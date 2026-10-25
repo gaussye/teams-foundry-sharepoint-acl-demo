@@ -1,0 +1,9 @@
+.azure/
+.env
+.env.*
+!.env.example
+node_modules/
+.venv/
+*.log
+*.pem
+*.pfx
