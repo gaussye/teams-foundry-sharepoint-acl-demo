@@ -54,6 +54,36 @@ Teams 中同一个应用的个人聊天
 
 仓库保留参数化模板、脚本和测试；含实际环境标识的 `.azure/` 部署记录、令牌、登录缓存及本地配置不提交到 Git。
 
+#### 门户步骤截图
+
+以下均为实际操作中保存的历史截图，于 **2026-10-25 补入文档**，不是本次重新执行创建、授权或发布。未在原图记录精确采集时刻的，不推断其时间。账号、订阅和非必要环境信息已遮挡或裁去；图片只证明所标注的页面阶段，不代替最终配置读回或运行时验收。
+
+**步骤 2：核对 A 的许可。** Microsoft 365 管理中心的 Active users 行同时显示 Copilot 附加许可、Teams 和基础 Microsoft 365 许可；用户名与显示名称已遮挡。
+
+![Microsoft 365 管理中心中 A 的 Copilot、Teams 和基础许可，账号信息已遮挡](docs/images/remote/01-user-a-license.png)
+
+**步骤 2：B 的按量策略限定专用计费组。** `Choose users → Specific group` 选择的是 Retrieval API 计费组，不是全部用户，也不是人事内容授权组。此图是选择范围的向导步骤，不单独证明最终连接已保存。
+
+![B 的 Retrieval API 按量策略在 Choose users 步骤选择 Specific group](docs/images/remote/02-b-payg-scope.png)
+
+**步骤 2：保存 Retrieval API 计费连接。** 页面显示 `Billing policy connection(s) updated` 和 `Connected`；仅证明连接保存，不等于已产生检索结果或固定费用封顶。
+
+![Retrieval API 计费连接保存成功并显示 Connected，订阅和资源组信息已遮挡](docs/images/remote/03-b-payg-connected.png)
+
+**步骤 3：核对专用库的独立权限。** 以人事库为例，显示 `This library has unique permissions`、人事安全组 `Read` 和 `test Owners` 的 `Full Control`。这张图不是 Owners 组成员清单，不代表该组为空。
+
+![SharePoint 人事库独立权限表，仅列出人事组 Read 和 Owners Full Control](docs/images/remote/04-hr-library-permissions.png)
+
+**步骤 6–7：找到组织发布请求。** Microsoft 365 管理中心的 `Agents → All agents → Requests` 列出本 Demo 的 `Pending review / Publish` 请求。这是**当时送审阶段**的历史画面，不能解释为当前仍待审，也不是最终已发布状态的截图。
+
+![Microsoft 365 管理中心 Requests 中本 Demo 送审时的 Pending review 状态](docs/images/remote/05-agent-publish-request.png)
+
+**步骤 7 / 问题记录：检查安全策略模板。** 历史审核向导显示默认模板及“当前角色不能应用自定义策略”的提示；对应 §0.5 的策略问题。不能仅因向导列出 CA 或 Access Package 就声称其已配置，也不能据此推断租户 CA 被关闭。
+
+![管理员发布向导的安全策略模板及历史角色限制提示](docs/images/remote/06-publish-policy-review.png)
+
+没有保存到的 Foundry Agent/KB 创建页面，不用其他项目或 Indexed 路线的图片代替。上述图片不是完整的逐点击部署录像；实际对象配置与最终状态以 §0.1、§0.4 的已核实记录为准。
+
 ### 0.3 在 Teams 复现正常问答
 
 1. 使用两个独立浏览器配置文件或隔离会话，分别打开 A/B 的 Teams。核对 Teams 账号菜单中的完整测试账号，不以浏览器配置文件名称代替身份核实；保留已有正常登录，不操作公司的其他 Teams 会话。
@@ -99,6 +129,28 @@ node --test .\tests\remote-kb-probe.test.mjs .\tests\foundry-agent-config.test.m
 ```
 
 累计已发送 **12 条**，包括十条问题和两条命令，包含早期无回复尝试；**不是十二次成功检索**。既有发送上限为 16，但本次未使用剩余额度；该上限不是费用封顶，模型、Search、Retrieval API 和日志可能分别计量。
+
+#### 真实 Teams 测试截图
+
+以下为 **2026-10-25 既有测试**的真实截图，图中时间为 UTC+8；本次仅从已保存原图裁切、脱敏并嵌入，未增发问题或重新登录。为避免暴露账号，已裁去个人资料、浏览器标签和不必要的链接浮层；A/B 归属依据测试前身份核实及本地机器记录，不靠裁切后的截图单独证明用户 object ID。
+
+**A：原问题与财务 / 公共答案。** 图中保留 10:04 的问题、`Foundry login complete` 及完整答案：财务 `4200 / CEDAR-F482`，公共 `1000 / CEDAR-P731`。更早的无回复尝试也保留在同一历史聊天画面中，不计为成功答案；消息的原始时间不是完整回答的完成时刻。
+
+![A 在同一 Remote Agent 私聊中完成登录后取得财务和公共的真实答案](docs/images/remote/07-a-teams-answer.png)
+
+**B：相同问题与人事 / 公共答案。** 图中保留 10:16 的问题、登录完成卡及完整答案：人事 `7300 / CEDAR-H965`，公共 `1000 / CEDAR-P731`。该问题由用户手动发送，未用管理员代测。
+
+![B 在同一 Remote Agent 私聊中完成登录后取得人事和公共的真实答案](docs/images/remote/08-b-teams-answer.png)
+
+**A：既有会话重复提问。** 10:24 和 10:27 两次可见答案仍只含财务与公共。此图证明对应答案内容，**不证明请求实际并发或每次都重新调用 KB**。
+
+![A 的两次历史重复问题及财务和公共答案，不作为并发证明](docs/images/remote/09-a-repeat-answers.png)
+
+**B：会话重置回执与新答案。** 10:40 的重置命令后，10:41 明确收到 `Conversation reset. Send a new message to start a fresh thread.`，随后同题答案仍只含人事与公共。成功 KB 工具调用来自 §0.4 所述同一测试窗口的遥测，不是截图本身能证明的内容。
+
+![B 的真实重置确认、新问题及仅人事和公共的新答案](docs/images/remote/10-b-reset-and-answer.png)
+
+图中的引用编号只证明存在编号，不能单独证明链接目标；四个目标的核对结果见 §0.4。以上均为答案级正例，不扩大为缺失/过期身份、无 app-only fallback、任意会话归属或撤权通过的结论。
 
 ### 0.5 遇到的问题与处理
 
