@@ -73,11 +73,48 @@ Agent 的 MCP 工具通过 `project_connection_id` 引用这个连接，代码�
 
 ### SharePoint 内容授权与用户登录
 
-公共内容组包含 A+B，财务内容组包含 A，人事内容组包含 B；三个库各自具有独立 ACL，对应内容组为 Read，保留 Owners 的 Full Control，文件继承所在库权限。这是已核实的合成来源基线，参见 §0.2 的权限截图；**不是本次对全部来源权限重新执行实时审计**。
+**先记住：能进入 Teams、能使用这个助手、能看某份文档，是三件不同的事。**
 
-用户首次聊天出现的 `User Sign-in` 卡用于建立该用户在 Foundry 调用链路中的认证上下文，不是让用户登录成项目托管身份或 Agent Identity。Bot 的后台服务认证也不等于这张用户登录卡。
+| 这一关 | 用人话说 | 本 Demo 怎么处理 |
+| --- | --- | --- |
+| Teams 登录 | 你可以进入聊天工具并发送消息 | A/B 各自登录自己的 Teams 账号 |
+| Foundry 登录与调用权限 | 后面的助手服务要确认你是谁，以及能不能使用它 | 原生通道显示登录卡；按 `BotServiceRbac` 检查登录用户是否有调用权限，本例为 `Foundry Agent Consumer` |
+| SharePoint 内容权限 | 即使可以使用助手，也不代表可以看所有部门的资料 | 来源服务按当前用户的有效权限返回内容，A 只能看公共+财务，B 只能看公共+人事 |
 
-此处记录实际绑定及设计职责，**不把它当成逐跳令牌取证或完整安全验收**。更改连接为 Agent Identity 认证、增减 RBAC 或缩小作用域均属后续变更，需要单独验证和批准，本次没有执行。
+#### 为什么第一次发消息，还会要求 Foundry login？
+
+**因为 Teams 是聊天入口，Foundry 是后面真正运行助手的服务。你已经登录 Teams，不代表这条 Foundry 助手的用户登录也已经完成。** 当前采用的 Foundry 原生 Teams 通道会另外建立用户登录状态，所以第一次交互时会出现 `User Sign-in / Waiting for Foundry login to complete`。
+
+演示时，用**与当前 Teams 一致的测试账号**完成这一步。卡片变成 `Foundry login complete` 后，助手继续处理原问题，通常不必重新发送。之后一般会复用登录状态，不需要每条消息或每天固定重登；会话过期或安全策略要求时，可能再次提示。
+
+这不是让你进入 Foundry 管理门户，也不是管理员登录，不是让你登录成 Agent Identity 或项目托管身份；**更不是因为 SharePoint 拒绝了某份文件，才临时要求登录。** Bot 自己在后台证明“我是哪个机器人”，与这张确认“聊天用户是谁”的登录卡也是两件事。
+
+#### 这个登录要求配置在哪里？
+
+在 **Agent 入口授权规则** `agent_endpoint.authorization_schemes` 中，不在 KB 的 Knowledge 页面，也不在 MCP 连接的 `ProjectManagedIdentity` 设置中。本例实际有两条规则：
+
+- **`BotServiceRbac`**：Teams / Microsoft 365 通道使用。用户登录后，检查其 Agent 调用权限；本例 A/B 各有项目级 `Foundry Agent Consumer`。
+- **`Entra`**：供 SDK、REST 等直接客户端调用使用。不是要求 Teams 用户接着再登录第二遍。
+
+原生发布流程会配置通道规则；本例以实际读回的 `BotServiceRbac` 为准。[官方文档](https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/agent-endpoint-authorization#bot-service-channel-authorization)明确说明，`BotServiceRbac` 和 `BotServiceTenant` 都会在对话中显示登录提示。后者只检查登录用户是否属于配置租户，不要求逐用户 Foundry RBAC；**换成后者不等于消除首次登录**，本 Demo 也没有做这种变更。
+
+#### 是所有接入 Teams 的应用都要再登录一次吗？
+
+**不是。** 这里说的是当前使用的 **Foundry 原生发布通道**。普通 Bot、自建 Teams 应用或其他产品的接入方式可以不同；支持并正确配置 SSO（单点登录）的应用，在满足同意和安全策略要求时可以减少额外登录。不能把通用 Teams SSO 的能力直接当成这条原生通道已提供完全免登录的保证。
+
+如果改为你的应用**直接通过 API 调用 Foundry Agent**，API 不会在聊天里自动发这张卡，而是要求应用先取得有效访问令牌。用户型应用负责用户登录和令牌获取；后台程序可以用获准的服务身份自动取得令牌，无需人手登录。两者仍需满足对应的 Agent 调用授权。**后台程序免人工登录，不等于它自动知道请求代表 A 还是 B**；若还要按 A/B 的文档权限检索，就必须保留真实用户授权上下文。[API 配置说明](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/configure-agent-endpoint-authorization)
+
+#### 登录成功，会不会多出文档权限？
+
+**不会。** 登录是确认身份，不是把财务或人事资料开放给所有人。公共组 `sg-teams-acl-demo-public` 包含 A+B，财务组 `sg-teams-acl-demo-finance` 包含 A，人事组 `sg-teams-acl-demo-hr` 包含 B。对应专用库分别给这些组 Read，保留 Owners 的 Full Control，文件继承所在库权限。`Foundry Agent Consumer` 也不等于 SharePoint 的 Read 权限。
+
+这段来源权限描述是已核实的合成数据基线，参见 §0.2 的截图，**不是本次重新审计全部 SharePoint 权限**。当前 Remote 正常问答采用平台托管的用户认证与检索链路，没有自建用户令牌透传后端；但仅配置项目托管身份，并不能自动证明用户权限隔离已经成立。
+
+#### Teams 登录 A，却在 Foundry 登录卡里选 B 呢？
+
+**当前演示不要混用账号；这个错配场景尚未实测。** 如果平台接受 B 并把 B 认定为调用主体，入口会检查 B 的调用权限，不能拿 A 的权限代替；而本例 A/B 都有 Consumer，单靠这个角色检查不能证明账号一致。
+
+平台是否拒绝错配、后续检索到底代表谁、结果回到哪个聊天，都需要单独核实，不能承诺“必定失败”或“仍按 A 处理”。正常的 A/A、B/B 答案只证明相应正例，**还不能证明错配账号、缺失/过期身份、会话归属及完整身份传递链已通过安全验收**。目前没有为这次文档更新切换账号、重新提问或修改认证/权限配置。
 
 ## 权限流程图
 
