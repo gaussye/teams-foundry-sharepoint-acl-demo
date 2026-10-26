@@ -20,6 +20,63 @@
 5. **结果可核验。** 用真实 Teams A/B 问答、合成金额/校验码及实际引用目标检查结果，记录截图、问题与处理办法；本地测试不能冒充云端验收。
 6. **异常时安全失败。** 缺失/过期身份、检索失败或认证挑战时，应拒绝或要求用户认证，不得回退 app-only 检索；这一项及会话归属、真正并发、线上强制私聊保护仍需独立验收，撤权测试按要求延期。
 
+## 本 Demo 实际使用的身份、角色与作用域
+
+以下是 **Remote 路线**的实际配置，不是产品所有可选认证方式的清单。Azure RBAC 于 **2026-10-26 13:35 UTC+8** 使用指定 admin 只读核对；Bot 应用绑定及 MCP 连接认证类型也已只读核实。查询没有新增、删除或修改任何权限。
+
+### 身份用在哪里
+
+| 身份 / 对象 | 本例对应项 | 实际用途 | 本例的角色或绑定 |
+| --- | --- | --- | --- |
+| 普通测试用户 A | 财务测试用户 | 登录 Teams / 完成 Foundry 登录卡，以自身身份提问 | 隔离项目上的 **Foundry Agent Consumer**；公共组 + 财务组 |
+| 普通测试用户 B | 人事测试用户 | 同一个 Agent 的另一位用户，保留独立用户上下文 | 隔离项目上的 **Foundry Agent Consumer**；公共组 + 人事组 |
+| **项目托管身份** | `teams-acl-demo` 的系统分配身份 | MCP 连接以它获取 Search audience 的服务访问令牌 | Search 服务上的 **Search Index Data Reader** |
+| **Remote Agent Identity** | `teams-acl-demo-sp-remote-agent` 的实例身份 | Client ID 与已部署 Azure Bot 的 `properties.msaAppId` 一致，作为 Teams/Bot 应用身份绑定 | **应用身份绑定，不是给它授予 Search Reader**；本连接未选择它作为 Search 认证主体 |
+| **Agent Identity Blueprint** | 上述 Agent 的身份蓝图及对应 Blueprint Principal | Foundry 管理 Agent 身份、认证配置和生命周期的基础设施，不是 A/B 用户或提示词模板 | 不是 SharePoint 内容授权；本次在 Search 作用域未查到其 Blueprint Principal 的直接/继承 RBAC 赋权 |
+| 内容安全组 | `sg-teams-acl-demo-public`、`sg-teams-acl-demo-finance`、`sg-teams-acl-demo-hr` | SharePoint 库级授权的真实主体 | 对应专用库 **Read**；这是 SharePoint 权限，不是 Azure RBAC |
+| `test Owners` | SharePoint 内部 Owners 组 | 保留来源管理权限；文件按实际继承关系取得有效 ACL | 专用库 **Full Control**；不能据此认为组为空或把它等同于全部员工 |
+| 部署管理员 | 指定 admin | 获准的资源部署、配置、角色管理和诊断 | **不是 A/B 正常检索身份**；其既有管理权限不作为普通用户可读文档的依据 |
+
+**身份是否存在、入口使用什么身份、工具连接使用什么身份，是三件不同的事。** Remote 与 Indexed Agent 的 Agent Identity 可以不同；本表不据此推断 Indexed 连接使用哪种身份。每条工具连接都应单独核对。
+
+### 已核实的 Azure RBAC 绑定
+
+| 被授权主体 | 角色 | 实际作用域 | 允许做什么 / 不代表什么 |
+| --- | --- | --- | --- |
+| A | `Foundry Agent Consumer` | Foundry **项目** `teams-acl-demo` | 提供项目范围的 Agent 消费/调用资格；不是 SharePoint 财务权限，也不是仅限某个文件或单一 Agent 版本 |
+| B | `Foundry Agent Consumer` | 同一个 Foundry **项目** | 与 A 一样具有调用资格，但不会因此获得财务文档权限 |
+| 项目系统分配托管身份 | `Search Index Data Reader` | 现有 **Search 服务** | 为 MCP 提供只读数据访问权限；此次读回未出现上传/更新文档的 Data Contributor 角色。**当前是服务级，不是单个 KB 或 Index 级隔离** |
+
+本次还按 Remote Agent Identity 和 Blueprint Principal 查询了同一 Search 作用域及其继承角色，均未返回赋权。该结果只描述此次查询范围，不是它们在全租户、所有服务或所有组间接授权上的完整审计。管理员已有的订阅/租户管理角色也不在这张运行时最小绑定表中展开。
+
+**只读角色不等于文档 ACL。** `Search Index Data Reader` 回答的是“这个服务主体可否调用 Search 数据接口”；A/B 可见哪些 SharePoint 文件，仍要由检索链路保留用户授权上下文并执行来源有效权限。三个 Demo 库的 Path 过滤表达式也不是这个 RBAC 角色的作用域边界。
+
+### 哪个配置决定调用 Search 时使用谁
+
+实际项目连接为 `teams-acl-demo-sp-remote-kb-mcp`：
+
+```json
+{
+  "properties": {
+    "category": "RemoteTool",
+    "authType": "ProjectManagedIdentity",
+    "audience": "https://search.azure.com/"
+  }
+}
+```
+
+Agent 的 MCP 工具通过 `project_connection_id` 引用这个连接，代码配置位于 `scripts/foundry-agent-config.mjs`。所以本例是 **Agent Identity 绑定 Bot 应用，项目托管身份认证 Search 连接，A/B 用户身份决定来源可见内容**；不是所有环节自动使用同一个身份。
+
+查找时区分以下位置：Agent Details 的 **Identity & access** 查看 Agent Identity / Blueprint；Foundry **项目资源**的 Identity 或资源 JSON 的 `identity.principalId` 查看项目托管身份；项目 Connections 查看连接的 `properties.authType`；Search **Access control (IAM)** 查看该主体实际获得的角色与作用域。
+
+### SharePoint 内容授权与用户登录
+
+公共内容组包含 A+B，财务内容组包含 A，人事内容组包含 B；三个库各自具有独立 ACL，对应内容组为 Read，保留 Owners 的 Full Control，文件继承所在库权限。这是已核实的合成来源基线，参见 §0.2 的权限截图；**不是本次对全部来源权限重新执行实时审计**。
+
+用户首次聊天出现的 `User Sign-in` 卡用于建立该用户在 Foundry 调用链路中的认证上下文，不是让用户登录成项目托管身份或 Agent Identity。Bot 的后台服务认证也不等于这张用户登录卡。
+
+此处记录实际绑定及设计职责，**不把它当成逐跳令牌取证或完整安全验收**。更改连接为 Agent Identity 认证、增减 RBAC 或缩小作用域均属后续变更，需要单独验证和批准，本次没有执行。
+
 ## 权限流程图
 
 下图说明本 Demo 的**权限职责与目标处理流程**，不是逐跳令牌报文的取证图。实线表示正常请求、授权判断和返回路径；虚线说明必须保留的用户上下文，以及仍待负例验证的异常分支。
