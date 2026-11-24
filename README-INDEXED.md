@@ -151,6 +151,45 @@ https://search-service-ypy2.search.windows.net/knowledgebases/teams-acl-demo-sp-
 5. 单独获批后创建专用 MCP 连接、Agent、Bot、Teams channel，并原生 Shared 发布；读回目标/身份/范围，核对 Remote Agent 完整 GET 前后相等。
 6. A/B 分别核对真实身份、获批安装后个人私聊测试；预算、实测和限制见第 5–6 节。未创建线上评估套件。
 
+#### 4.2.1 自建 ACL 入库具体做了什么
+
+**把“正文”和“谁能读”一起转换成 Search 索引记录。** 本路线没有创建 Azure Search Indexer，而是由自建脚本承担一次性采集、权限解析、分块与 Push 上传；不是原生 Indexer 不具备 ACL 能力，而是当前租户存在前述 CA 支持限制。
+
+| 步骤 | 实际处理 |
+| --- | --- |
+| 读取内容与有效权限 | 对三份获批 DOCX 读取库角色、文件继承、内部组/站点管理员及 Graph 文件权限；在采集前后核对版本和 ACL，不按 A/B 预期答案生成权限 |
+| 解析来源主体 | 内容安全组经 Graph 校验后，其 Object ID 写入 `groupIds`，不展开为硬编码 A/B 清单；SharePoint 内部组展开真实成员；owners-only 只将实际 owners 的用户 Object ID 写入 `userIds`，本次仅 admin，不授予整个 M365 组 |
+| 交叉校验与失败关闭 | 核对 SPO ACL 能否解释 Graph 授权，检查快照完整性、新鲜度、文件大小及 SHA256；未知主体/角色、共享链接、组环、权限变化等阻止整个上传 bundle。仅精确 `SHAREPOINT\system` 不生成 Entra 查询授权并保留审计 |
+| 提取正文并分块 | 从 DOCX 提取正文纯文本，按每 **2000 个字符**分块；修订、图片/对象等不支持形态拒绝。每个 chunk 复制源 `userIds` / `groupIds`、来源链接、正文与快照哈希 |
+| 配置并上传 | 启用 Index `permissionFilterOption`，标注 `userIds` / `groupIds` 的 `permissionFilter`，均可过滤、不可返回；通过 Push API 上传，建立专用 KS/KB 绑定。临时上传角色仅限单 Index，结束后精确删除并读回确认 |
+
+单个 chunk 的示意结构如下，文件名、ID 与哈希均为占位值，不是上传配置：
+
+```json
+{
+  "id": "finance-file-chunk-0",
+  "title": "来源文件名.docx",
+  "content": "这一段正文",
+  "sourceUrl": "原文件地址",
+  "userIds": ["实际 owner 的用户 Object ID"],
+  "groupIds": ["真实财务内容组的 Object ID"],
+  "contentSha256": "源文件哈希",
+  "snapshotSha256": "采集清单哈希"
+}
+```
+
+**关键是每个可检索 chunk 都带源 ACL，而不是只给父文件或单独权限表加授权。** 本次三份文件共 53,167 bytes，最终生成并上传 3 个 chunk。
+
+脚本对应关系：`indexed-browser-capture.mjs` + `indexed_capture_import.py` 采集和解析，`indexed_acl.py` 离线校验/分块，`indexed_deploy.py` 创建、上传及清理。自建程序负责正确入库，**Search 负责查询时结合最终用户身份筛选，模型不决定授权**。
+
+当前只实现一次性入库，没有持续增量、删除或 ACL 变更同步；查询时的用户身份传递是另一环节，完整轨迹仍待核实。前后快照检查也不构成跨服务原子事务。输入格式与具体失败关闭规则见第 7.2 节。
+
+#### 4.2.2 原生 SharePoint Indexer 隔离试验（2026-11-23）
+
+原生方案已整理到独立文档 **[README-NATIVE.md](README-NATIVE.md)**：三库各一个 Data source/Indexer，共用一个新 Index；MI 联合凭证、原生 ACL 和站点组查询配置均与 Push 路线分离。
+
+2026-11-23 三次原生运行成功、Index 3 条记录；2026-11-24 A/B 正常同题答案分别为 Public + Finance、Public + HR，有真实截图和工具/模型 spans。完整权限审计仍未验收；实际观察3条问题（含非助手发送的额外B问题，超过原2条批准上限）及元数据投影审批顺序失误均在新文档保留。原生配置截图的完成状态以新文档为准，不复用下面的 Push 配置图。
+
 ### 4.3 Portal 配置核对与截图
 
 以下 6 图拍于 **2026-10-25 17:27–17:32（UTC+8）**。资源由脚本/API 创建，图为**部署后的实际配置页，不是历史创建向导**。已裁除浏览器栏、遮挡 Portal 账号；补图未保存配置、重建、发布或发送测试消息。
