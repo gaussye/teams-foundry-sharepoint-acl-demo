@@ -1,8 +1,10 @@
 # Teams + Foundry + SharePoint：原生 Indexer Demo
 
+> **最新状态：2026-11-25 统一管线迁移未验收，已恢复原入口。** 已部署1个Data source＋1个Indexer读取既有三库的7个DOCX/PDF/PNG，并成功入库7条；但管理员自身身份的普通权限过滤读回为0条，尚不能确认正文/图片描述读回及新管线查询权限。没有提权绕过或扩大MI权限，KB已恢复原有两个来源，原4个图表Indexer恢复启用，新统一Indexer暂停保留。**目前不能说线上已合并完成**。目标结构、失败证据及后续诊断边界见第9节；第4–8节的截图和A/B测试属于合并前版本。
+
 ## 1. 背景、需求与实际结果
 
-原始三份 DOCX 验收中，两个 Entra 用户在 Teams 中向**同一个 Agent、KB、Index**提同一道问题，按真实 SharePoint 权限获得不同资料：A 为 Public + Finance，B 为 Public + HR。隔离范围包括正文、标题、金额、校验码和来源链接，不能靠提示词或硬编码部门实现授权。2026-11-25 新增的独立图表 Index/KS 及尚未完成的图表用户验收见第 8 节，不能与旧测试混淆。
+原始三份 DOCX 验收中，两个 Entra 用户在 Teams 中向**同一个 Agent、KB、Index**提同一道问题，按真实 SharePoint 权限获得不同资料：A 为 Public + Finance，B 为 Public + HR。隔离范围包括正文、标题、金额、校验码和来源链接，不能靠提示词或硬编码部门实现授权。2026-11-25 独立图表 Index/KS 的A/B实际结果见第8节；后续统一管线的迁移状态见第9节，不能将旧测试当作新管线验收。
 
 本路线由 **Azure AI Search 原生 SharePoint Indexer**读取内容和权限；不是 [自建 ACL Push](README-INDEXED.md)，也不是 [Remote 实时检索](README.md)。手工配置 Data source、Indexer 和 Index，再用 `searchIndex` knowledge source 接入 KB。
 
@@ -32,6 +34,8 @@
 
 ## 2. 架构与权限流程
 
+以下图为原始DOCX基线架构；现有图表扩展和待验收统一架构分别见第8、9节。
+
 ```mermaid
 flowchart TD
     subgraph INGEST["原生入库：三库各一个来源/Indexer"]
@@ -58,9 +62,9 @@ flowchart TD
     end
 ```
 
-**三个 Data source/Indexer 合用一个 Index**：三库权限不同，但字段和处理方式一致；各来源单独限定、运行和留证，不必为 A/B 建不同 Index。当前没有 Skillset，原生文档解析直接写入一文件一记录；这不是完整长期调度方案，Indexer 结束后均禁用、无定时计划。
+**原始三个 Data source/Indexer 合用一个 Index**：三库权限不同，但字段和处理方式一致；各来源单独限定、运行和留证，不必为 A/B 建不同 Index。原始DOCX管线没有Skillset，一文件一记录，结束后禁用、无定时计划；这不是第8节图表管线或第9节统一管线的当前配置。
 
-后续若添加 Text Split，必须把 `/document/metadata_user_ids`、`metadata_group_ids`、来源路径和来源站点投影到**每个 chunk**。`skipIndexingParentDocuments` 模式下仅给父级做 fieldMappings 不够；新旧 chunk 的更新、删除和权限传播也须测试。本轮未增加 Skillset、向量模型或重跑入库。
+后续若添加Text Split，必须把 `/document/metadata_user_ids`、`metadata_group_ids`、来源路径和来源站点投影到**每个chunk**。`skipIndexingParentDocuments` 模式下仅给父级做fieldMappings不够；新旧chunk的更新、删除和权限传播也须测试。第9节统一方案仍是一文件一记录，不使用chunk-only投影，因此保留Indexer直接ACL映射。
 
 ## 3. 身份、权限与真实 scope
 
@@ -466,6 +470,67 @@ B图由子会话从已有CU原图裁掉账号/侧栏并明确遮挡旧消息，�
 
 **结论：** 四种“身份×格式”都有真实允许内容，A未见HR、B未见Finance，配对可见答案级隔离观察通过。图表答案的严格字段完整性为3个通过、1个部分通过（A PDF漏显式最低项），不包装成四项全通过，也不补发。没有完整caller/逐chunk ACL决策trace、撤权测试、完整引用至文件映射或全SharePoint授权语义证明；没有另发遥测或后台检索。本轮实际A/B各1、共2/2题，无余额，UI已停止。
 
+## 9. 一个 Data source、一个 Indexer 的统一方案（未完成验收）
+
+### 9.1 为什么可以合并，为什么不用扩大 MI 权限
+
+先前三个文本Indexer和四个图表Indexer是为分库、分格式和限次测试留证拆开的，不是ACL必须如此。三库使用同一采集身份且schema一致，可用一个 `useQuery` Data source重复指定三个 `includeLibrary`，再由一个Indexer同时处理 `.docx,.pdf,.png`。选择器不会授予权限，不使用allSiteLibraries或扩展到其他站点。
+
+**没有新增Managed Identity角色、Entra同意、凭证或站点授权。** 继续使用Search MI→既有FIC→既有采集应用读取test三库，以及Search MI已有模型资源级Cognitive Services OpenAI User。模型访问、SharePoint采集权限和最终用户文档ACL是三个不同层面；扩大MI权限不修复用户ACL解析，也不是合并的前提。
+
+```mermaid
+flowchart LR
+    SP["既有Public/Finance/HR三库<br/>3 DOCX + 2 PDF + 2 PNG"]
+    DS["1个sharepoint Data source<br/>3条明确includeLibrary"]
+    IX["1个Indexer<br/>正文提取 + 标准化图片"]
+    VIS["GenAI Prompt Skill<br/>仅图片生成描述"]
+    MERGE["Text Merge Skill<br/>原始正文 + 图片描述"]
+    INDEX["统一Index<br/>一源文件一记录<br/>源ACL / 路径 / 站点"]
+    KS["1个searchIndex KS"]
+    KB["既有native KB / Agent<br/>仅验收后切换"]
+    SP --> DS --> IX --> MERGE --> INDEX --> KS --> KB
+    IX --> VIS --> MERGE
+    IX -.->|"原生ACL字段映射，不经模型"| INDEX
+```
+
+### 9.2 已部署的统一对象与内容处理
+
+| 组件 | 名称 / 定义 |
+| --- | --- |
+| Data source | `teams-acl-demo-sp-native-unified-ds`，仅Public/Finance/HR三库 |
+| Indexer | `teams-acl-demo-sp-native-unified-indexer`，三种格式，一次初始入库，当前暂停，schedule null |
+| Skillset | `teams-acl-demo-sp-native-unified-skillset`，复用图表视觉模型Skill，再Merge原文与图片描述 |
+| Index / KS | `teams-acl-demo-sp-native-unified-index` / `teams-acl-demo-sp-native-unified-ks`，已有7条记录，但查询验收未通过 |
+| KB当前路由 | 已恢复原 `teams-acl-demo-sp-native-ks` ＋ `teams-acl-demo-sp-native-charts-ks`，不是统一KS |
+
+统一Skillset不再只投影 `normalized_images/*`，否则纯文字DOCX会丢失。它保留 `/document/content`，把图片Skill的 `description` 按contentOffset合并成 `unifiedContent`，再用outputFieldMappings写入 `content`。每段图片描述带 `[AI-generated image description]` 边界，不能冒充原文事实。小型测试资料暂不额外分块、embedding或OCR；独立PNG没有原正文时使用图片描述，一份PDF包含正文时两者都保留。这个处理定义已通过本地检查，但真实七份内容的成功读回仍是待验收项。
+
+由于一文件一记录，Indexer直接映射 `metadata_user_ids`→`userIds`、`metadata_group_ids`→`groupIds`、`metadata_spo_site_url`→创建时已标记的 `SharePointSiteUrl`，并保留必需 `metadata_spo_item_path`。ACL/站点/来源路径仍不可返回、不传给模型，不硬编码A/B授权清单。没有投影父子索引，因此也没有 `parentId` 字段。
+
+### 9.3 实际迁移、检查与安全恢复
+
+1. 重新只读枚举三库及每个文件有效Graph ACL。确认仅7个既定文件、图表子文件夹未混入其他内容，各文件与所属库的有效ACL一致；未重新下载、上传、移动或修改源文件。
+2. 新建隔离的统一Index/Skillset/DS/Indexer。首次DS读回校验因服务将 `credentials.connectionString` 隐去为null而误报，保留错误；随后仅验证对应非敏感字段并接续创建缺少的Indexer，没有覆盖既有对象。连接串内容没有从GET重新取得，实际运行另作验证。
+3. 统一Indexer仅启用一次，执行 `success`、处理7、失败0、errors空。刚结束时统计连续为0而阻止切换，后续只读GET最终确认7条，**没有重新Run或重复调用入库**。保留文件夹ACL传播和图片提取计费warning。
+4. 创建统一KS、以ETag仅切换既有native KB的来源，并暂停旧Indexer。随后一次普通管理员用户权限过滤查询只选文件名、正文、sourceUrl，未用elevated、未返回ACL ID，结果为0条；不能判断是管理员源组解析还是新管线ACL/输出问题，更不能据此判A/B通过。
+5. 请求“仅新Index一次受限诊断＋精确角色/字段恢复”的确认未收到实际用户回答，因此**未执行任何提权诊断或字段可见性修改**。为避免留下未验证替换，已使用ETag恢复原KB的两个来源和旧Indexer状态，新统一Indexer暂停保留。原图表4个恢复启用，原文本3个仍禁用，均无定时计划。
+
+旧对象保留便于回退，**没有删除旧7个Indexer或旧5个Data source**，因此Portal总数暂时更多，不代表已经达到“总共仅一个”的最终清理目标。统一入口通过真实内容/权限验证后才能重新切换；旧资源删除需要明确确认，不能为减少界面数量先删掉已验证路线。Remote和Push配置未修改，也没有新的A/B消息、组织授权或容量变化。
+
+迁移前第8节的A/B2题预算已用尽，本轮没有复用或重发。之前的A/B截图和3通过/1部分通过结论仅对应旧图表Index，不用于证明统一Index可见性。
+
+### 9.4 代码与证据
+
+- [`scripts/native_unified.py`](scripts/native_unified.py)：生成统一定义、精确预检、分阶段创建/一次入库、只读统计核实、普通管理员内容读回、ETag切换与自身变更回退；遇错保存证据，不提权回退、不自动重跑。当前代码将**成功的普通用户内容核验设为切换前置条件**，修正本次先切换后验证的执行顺序；实际先后仍按上文保留。
+- [`tests/test_native_unified.py`](tests/test_native_unified.py)：三库/三格式单来源、正文和图片合并、原生ACL直接映射、KB范围与ETag、隐藏连接串读回、正文丢失拒绝及未验证不得切换。离线测试不是线上ACL验收。
+- 私有 `.azure/indexed/native-unified-{preflight,deploy,resume-deploy,ingest,verify-ingest,cutover,validate-content,rollback,final-readback}-20261125.json` 保留每次真实结果；原始权限/正文诊断证据不入库。
+
+```powershell
+# 仅打印本地定义，不创建或运行任何对象。
+python -B .\scripts\native_unified.py definitions
+python -B -m unittest discover -s tests -p "test_native_unified.py" -v
+```
+
 ## 官方参考
 
 - [SharePoint Indexer及CA限制](https://learn.microsoft.com/en-us/azure/search/search-how-to-index-sharepoint-online)
@@ -474,3 +539,4 @@ B图由子会话从已有CU原图裁掉账号/侧栏并明确遮挡旧消息，�
 - [Foundry Agent连接KB](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/foundry-iq-connect)
 - [图片提取与OCR的不同职责](https://learn.microsoft.com/en-us/azure/search/cognitive-search-concept-image-scenarios)
 - [GenAI Prompt图像描述及SharePoint ACL端点限制](https://learn.microsoft.com/en-us/azure/search/cognitive-search-skill-genai-prompt#restrictions-with-sharepoint-permissions)
+- [Text Merge保留原文并合并图片文本](https://learn.microsoft.com/en-us/azure/search/cognitive-search-skill-textmerger)
