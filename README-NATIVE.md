@@ -321,9 +321,90 @@ node --test .\tests\indexed-agent-config.test.mjs .\tests\indexed-browser-captur
 | A/B最小遥测 | `native-e2e-A-telemetry-20261124.json`、`native-e2e-B-telemetry-20261124.json` |
 | 父会话授权/ACL非空诊断 | 父worktree的 `native-site-grant-20261123.json`、`native-acl-counts-20261123.json`，不声称本worktree已复制 |
 
+## 8. 图表扩展：部分部署，首次入库失败（2026-11-25）
+
+**状态不能与第 5 节混淆：** 旧三份 DOCX 的文字测试已完成；新增图表获用户明确批准后已上传4文件、创建隔离管线，但首次 Finance PDF 入库失败，**图表 Index 为0条，尚无图表理解或 A/B ACL 成功结果**。4个新 Indexer 及旧3个 Indexer 均已独立读回禁用，精确临时角色已删除。字段修复/补跑的追加确认未收到实际用户回答，因此没有自动修复线上字段或追加运行。原始失败证据保留。
+
+### 8.1 两种真实文件形态
+
+四份完全合成的数据位于 [`tests/fixtures/native-charts`](tests/fixtures/native-charts)，已分别上传到既有 Finance、HR 库的 `NativeCharts20261125` 文件夹。新文件夹和每个文件的有效 Graph 权限均与来源库逐项比较一致；未修改组、共享或权限继承。内容组成员也按真实 Graph 返回核对 A/B，不能将这次检查扩大为全部 SharePoint 授权语义证明。使用 PDF 是为了稳定验证文档内嵌位图，不把独立 PNG 包装成 PDF 冒充另一种情况。
+
+| 形态 | Finance：预期 A 允许 / B 拒绝 | HR：预期 B 允许 / A 拒绝 |
+| --- | --- | --- |
+| PDF 中的一张内嵌图 | [prism-finance-embedded.pdf](tests/fixtures/native-charts/prism-finance-embedded.pdf) | [prism-hr-embedded.pdf](tests/fixtures/native-charts/prism-hr-embedded.pdf) |
+| 独立 PNG 图片文件 | [prism-finance-standalone.png](tests/fixtures/native-charts/prism-finance-standalone.png) | [prism-hr-standalone.png](tests/fixtures/native-charts/prism-hr-standalone.png) |
+
+每图包含不同校验码、North/Central/South 柱形及刻度，但没有柱顶数值标签；验收不仅识字，还要读柱高、最大/最小地区和变化方向。PDF 只有通用标题的文本层，校验码、类别及图表均在图片像素中，不能靠普通 PDF 正文提取拿到答案。
+
+[`expected.json`](tests/fixtures/native-charts/expected.json) 仅作**本地人工验收基准**，记录 SHA256、数值、最高/最低类别及 A/B 预期矩阵；不得上传它、将其写入索引/提示词，或用预期矩阵替代真实源 ACL。合成图片在代码仓库可读，不代表云端文件应公开。
+
+### 8.2 原生描述管线
+
+[`scripts/native_chart_demo.py`](scripts/native_chart_demo.py) 仅生成本地文件/JSON；[`scripts/native_chart_live.py`](scripts/native_chart_live.py) 按获批阶段上传、创建对象和限次入库，默认无动作，必须显式执行，保存每次写入尝试和失败证据，不含 Entra consent、admin key、查询身份回退或无限重跑入口：
+
+```text
+SharePoint 原文件与真实 ACL
+  → SharePoint Indexer / generateNormalizedImages
+  → 每张 normalized image 调 GenAI Prompt Skill
+  → 图表描述作为 content
+  → 每图一条检索记录 + 原文档 ACL / 站点 / 路径投影
+  → 独立 searchIndex KS（待部署后接入原生 KB）
+```
+
+配置使用新前缀 `teams-acl-demo-sp-native-charts` 的 Index、Skillset、KS、两个精确文件夹 Data source；启用 PNG 兼容性配置时有四个 Indexer，各部门/格式各一个，全部默认 **disabled、schedule null、失败阈值0**。当前已创建 Index、Skillset、2个DS、4个Indexer；**KS尚未创建，原native KB尚未追加来源**。不修改或复用旧三份 DOCX 的 Indexer，不改 Remote/Push；输出 JSON 的外层是本地配置包，不能把整个包当 Search API 请求发送。
+
+`knowledge_base_update` 只接受预期的 native KB 单源/minimal/extractiveData 状态，保留原来源及其选项，并返回追加图表 KS 的请求体与 `ifMatch` ETag；遇到来源漂移、重复追加或缺少新鲜 ETag 即拒绝，不提交任何请求。
+
+复用已只读核实存在的 `gpt-4.1-mini` 部署和第一方 Azure OpenAI 端点。模型输入定义只有图片与固定描述指令，不含 ACL ID、预期答案或文件名。Search MI 已有资源级 Cognitive Services OpenAI User，无需新增持久角色。没有独立 OCR/embedding/Content Understanding 步骤，本轮定义采用**视觉模型直接生成描述 + 文本/语义检索**，不是图片向量检索或返回原图；首次运行报告处理0文件，不据此宣称完整账单或下游调用数为0。
+
+每条派生记录通过 **indexProjections** 直接复制：
+
+| 来源 | 目标 |
+| --- | --- |
+| `/document/metadata_user_ids` | `userIds`，原生 permissionFilter，不可返回 |
+| `/document/metadata_group_ids` | `groupIds`，原生 permissionFilter，不可返回 |
+| `/document/metadata_spo_site_url` | 创建时即标记 `sharepointSiteUrl: true` 的 `SharePointSiteUrl`，不可返回 |
+| `/document/metadata_spo_item_path` | 同名必需字段，不可返回 |
+| 原文件名、weburi、图片页码/offset | 检索来源与定位；独立图片页码可能为0，不编造物理页 |
+
+projection 使用 `skipIndexingParentDocuments`，不依赖父文档 fieldMappings 为子记录补 ACL，也不让模型生成权限。源身份/权限缺失时不能以共享组、硬编码 A/B 或 elevated read 替代最终用户身份；配置本身仍需通过真实允许/拒绝查询证明。
+
+### 8.3 未通过项与执行边界
+
+- **独立 PNG 支持未知。** Content Understanding/OCR/视觉模型能读 PNG，不等于 SharePoint 连接器一定能读取原始 PNG。连接器公布的格式表未列 PNG；默认配置只生成 PDF Indexer，PNG 需要显式 `--include-png-compatibility-probe`。这只是本地生成开关，**不是云执行批准**。若实际拒绝/跳过/没有图片输出，必须记为兼容性未通过，不用其他路线伪装通过。
+- **原图展示不在此实现中。** SharePoint ACL 摄取不支持 knowledge store/asset store，因此不能为展示原图偷偷添加文件投影、公开 Blob 或共享 SAS；本轮只检索图表描述和来源。
+- 用户已批准限定云操作和 A/B 各1题；创建前已核实四文件、来源实际 ACL、资源/角色碰撞和精确文件夹范围。四个隔离 Indexer 约定各最多一次应用级入库，结束即禁用，不自动 Reset/重跑。当前仅 Finance PDF 消耗首次运行，其余3个尚未运行。平台内部重试可能增加模型调用/计费，不能保证恰好四次模型请求。
+- A/B 应分别用真实身份和正常权限路径验证两种格式：允许文件的校验码、三个柱值、最高/最低、变化方向、文件来源均正确；另一个部门的正文、校验码、标题及来源均不能出现。无结果不能当“拒绝成功”，还要有对应允许用户的正例。已批新预算 A/B 各1题，当前发送0/2；没有因入库失败发题，旧测试预算不复用。当前会话未发现 Computer Use 工具，最终个人聊天交互仍需可用工具或用户协助，不能换 admin 冒充 A/B。
+- 既有 CA 官方支持限制、生成描述可能误读/幻觉、源 ACL 同步延迟继续存在；离线映射测试不证明实际 ACL ID、最终用户令牌传递或撤权行为。
+
+本地复现命令（均不访问云；依赖清单 [`tests/requirements-native-charts.txt`](tests/requirements-native-charts.txt)，当前环境已安装；Windows 默认使用 Arial，可用 `--font` 指定字体）：
+
+```powershell
+# 输出目录必须没有同名文件，禁止覆盖已有证据。
+python -B .\scripts\native_chart_demo.py fixtures .\.azure\native-chart-fixtures
+python -B .\scripts\native_chart_demo.py definitions --include-png-compatibility-probe
+python -B -m unittest discover -s tests -p "test_native_chart_demo.py" -v
+```
+
+新增本地测试覆盖每图源权限/路径/站点投影、模型输入不含ACL/预期答案、PNG显式兼容性开关、禁用/限格式/限文件夹配置、KB漂移保护、真实源ACL/成员漂移拒绝、清理异常时仍删除角色，以及从PNG/PDF内嵌位图像素反算柱高与基准一致。这些结果不是视觉模型识别或真实A/B权限验收。
+
+### 8.4 实际错误与恢复边界
+
+| 阶段 | 实际结果与处理 |
+| --- | --- |
+| 上传前只读核对 | Graph token 静默刷新时连接断开；写入尝试0。仅恢复此明确的无写入失败一次，原错误嵌入 journal 保留，随后4文件成功上传 |
+| 创建 Skillset | 固定提示词中的英文单引号未转义，服务明确400拒绝。Index已创建，Skillset未创建；修正本地字符串后核实唯一既有Index与预期相同，仅接续剩余对象，没有覆盖/重建Index或发起入库 |
+| 首次 Finance PDF 入库 | `transientFailure`，处理0、失败0，错误：`parentId is not a retrievable field`。原生连接器内部 `$select` 父子关联ID时要求它可返回；不能因失败数0就判断成功 |
+| 清理和独立读回 | Finance PDF历史1次，其余3个历史0次；新Index记录0；新4/旧3个Indexer均disabled，临时单Index Data Contributor不存在 |
+| 待批准修复 | 仅将新Index非ACL关联字段 `parentId` 设为retrievable:true，并给Finance PDF明确增加1次补跑，其余3个仍首次一次。确认工具返回用户不可用，**不是批准**；线上仍false，本地生成器已纠正。ACL、来源路径、站点字段继续不可返回 |
+
+私有证据（`.azure` 被忽略）：`native-charts-preflight-20261125.json`、`native-charts-source-acl-20261125.json` 位于 `.azure/`；上传/部署/运行/最终独立核对位于 `.azure/indexed/native-charts-{upload,deploy,run,after-first-run}-20261125.json`。临时assignment精确ID保存在run证据；没有把原始权限证据放进Git。
+
 ## 官方参考
 
 - [SharePoint Indexer及CA限制](https://learn.microsoft.com/en-us/azure/search/search-how-to-index-sharepoint-online)
 - [原生ACL摄取、字段投影与站点组查询](https://learn.microsoft.com/en-us/azure/search/search-indexer-sharepoint-access-control-lists)
 - [查询时ACL执行](https://learn.microsoft.com/en-us/azure/search/search-query-access-control-rbac-enforcement)
 - [Foundry Agent连接KB](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/foundry-iq-connect)
+- [图片提取与OCR的不同职责](https://learn.microsoft.com/en-us/azure/search/cognitive-search-concept-image-scenarios)
+- [GenAI Prompt图像描述及SharePoint ACL端点限制](https://learn.microsoft.com/en-us/azure/search/cognitive-search-skill-genai-prompt#restrictions-with-sharepoint-permissions)

@@ -1,0 +1,93 @@
+{
+  "status": "synthetic-fixtures-only-not-uploaded",
+  "question": "For the PRISM synthetic charts I can access, cover both the chart embedded in a PDF and the standalone PNG. For each, report the visible verification marker, the North/Central/South values, which region is highest and lowest, and how the bars change from North through Central to South. Cite the source file names. Use only retrieved evidence; if a format has no authorized evidence, say so without guessing. Do not retry.",
+  "expectedAclMatrix": {
+    "A": {
+      "allow": [
+        "finance"
+      ],
+      "deny": [
+        "hr"
+      ]
+    },
+    "B": {
+      "allow": [
+        "hr"
+      ],
+      "deny": [
+        "finance"
+      ]
+    }
+  },
+  "aclNote": "Test expectations only; obtain ACLs from SharePoint, never from this manifest.",
+  "files": [
+    {
+      "name": "prism-finance-embedded.pdf",
+      "department": "finance",
+      "format": "pdf",
+      "library": "TeamsAclDemoFinance",
+      "folder": "NativeCharts20261125",
+      "marker": "PRISM-F61",
+      "values": {
+        "North": 20,
+        "Central": 60,
+        "South": 40
+      },
+      "highest": "Central",
+      "lowest": "North",
+      "sha256": "ee2e1c3dd0818f4e6f219dc599f26d0e6cbfe79ab04ec7a741937a9f926357e3",
+      "bytes": 53111
+    },
+    {
+      "name": "prism-finance-standalone.png",
+      "department": "finance",
+      "format": "png",
+      "library": "TeamsAclDemoFinance",
+      "folder": "NativeCharts20261125",
+      "marker": "PRISM-F82",
+      "values": {
+        "North": 80,
+        "Central": 40,
+        "South": 20
+      },
+      "highest": "North",
+      "lowest": "South",
+      "sha256": "1d5aa2d833d3242c227d66500cad20aa95bd20cee3769f30992672bfcf0b9ee9",
+      "bytes": 48162
+    },
+    {
+      "name": "prism-hr-embedded.pdf",
+      "department": "hr",
+      "format": "pdf",
+      "library": "TeamsAclDemoHR",
+      "folder": "NativeCharts20261125",
+      "marker": "PRISM-H37",
+      "values": {
+        "North": 60,
+        "Central": 20,
+        "South": 80
+      },
+      "highest": "South",
+      "lowest": "Central",
+      "sha256": "a3bd097d7559e8fa57b1c0c9e82289a0b7b9d7a052acb5f012bca08e24042ff4",
+      "bytes": 54756
+    },
+    {
+      "name": "prism-hr-standalone.png",
+      "department": "hr",
+      "format": "png",
+      "library": "TeamsAclDemoHR",
+      "folder": "NativeCharts20261125",
+      "marker": "PRISM-H94",
+      "values": {
+        "North": 40,
+        "Central": 80,
+        "South": 60
+      },
+      "highest": "Central",
+      "lowest": "North",
+      "sha256": "aa7b2d9525df826cccd1e10b4ee00cf164736919dda03e03796170c3de5bd6b7",
+      "bytes": 47938
+    }
+  ]
+}
