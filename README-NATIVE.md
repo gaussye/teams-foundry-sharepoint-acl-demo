@@ -2,7 +2,7 @@
 
 ## 1. 背景、需求与实际结果
 
-两个 Entra 用户在 Teams 中向**同一个 Agent、KB、Index**提同一道问题，按真实 SharePoint 权限获得不同资料：A 为 Public + Finance，B 为 Public + HR。隔离范围包括正文、标题、金额、校验码和来源链接，不能靠提示词或硬编码部门实现授权。
+原始三份 DOCX 验收中，两个 Entra 用户在 Teams 中向**同一个 Agent、KB、Index**提同一道问题，按真实 SharePoint 权限获得不同资料：A 为 Public + Finance，B 为 Public + HR。隔离范围包括正文、标题、金额、校验码和来源链接，不能靠提示词或硬编码部门实现授权。2026-11-25 新增的独立图表 Index/KS 及尚未完成的图表用户验收见第 8 节，不能与旧测试混淆。
 
 本路线由 **Azure AI Search 原生 SharePoint Indexer**读取内容和权限；不是 [自建 ACL Push](README-INDEXED.md)，也不是 [Remote 实时检索](README.md)。手工配置 Data source、Indexer 和 Index，再用 `searchIndex` knowledge source 接入 KB。
 
@@ -109,6 +109,8 @@ Search 服务访问通过项目 MI；最终用户授权上下文应经 `x-ms-que
 ## 4. 配置顺序与 Portal 核对
 
 ### 4.1 已部署对象
+
+下表为 2026-11-24 原始 DOCX 基线；第 8 节记录之后追加的图表 Index/KS 和 native KB 的第二个来源。
 
 | 组件 | 名称 / 实际配置 |
 | --- | --- |
@@ -321,9 +323,9 @@ node --test .\tests\indexed-agent-config.test.mjs .\tests\indexed-browser-captur
 | A/B最小遥测 | `native-e2e-A-telemetry-20261124.json`、`native-e2e-B-telemetry-20261124.json` |
 | 父会话授权/ACL非空诊断 | 父worktree的 `native-site-grant-20261123.json`、`native-acl-counts-20261123.json`，不声称本worktree已复制 |
 
-## 8. 图表扩展：部分部署，首次入库失败（2026-11-25）
+## 8. 图表扩展：两种形态已入库，A/B待验收（2026-11-25）
 
-**状态不能与第 5 节混淆：** 旧三份 DOCX 的文字测试已完成；新增图表获用户明确批准后已上传4文件、创建隔离管线，但首次 Finance PDF 入库失败，**图表 Index 为0条，尚无图表理解或 A/B ACL 成功结果**。4个新 Indexer 及旧3个 Indexer 均已独立读回禁用，精确临时角色已删除。字段修复/补跑的追加确认未收到实际用户回答，因此没有自动修复线上字段或追加运行。原始失败证据保留。
+**状态不能与第 5 节混淆：** 旧三份 DOCX 的文字测试已完成；新增图表经过用户后续明确要求“提交代码，并开始测试”后，按已披露范围仅修复 `parentId` 并给 Finance PDF 增加一次补跑。现在 **PDF内嵌图、独立PNG各部门各1文件均成功，图表Index为4条，图表KS已追加到原native KB**。这不是图表答案正确或A/B ACL验收通过：用户问题仍发送0/2，当前缺少可调用的Computer Use工具，手工测试确认未收到实际用户回答。新4/旧3个Indexer均禁用，精确临时角色已删除，原始失败证据保留。
 
 ### 8.1 两种真实文件形态
 
@@ -351,11 +353,11 @@ SharePoint 原文件与真实 ACL
   → 独立 searchIndex KS（待部署后接入原生 KB）
 ```
 
-配置使用新前缀 `teams-acl-demo-sp-native-charts` 的 Index、Skillset、KS、两个精确文件夹 Data source；启用 PNG 兼容性配置时有四个 Indexer，各部门/格式各一个，全部默认 **disabled、schedule null、失败阈值0**。当前已创建 Index、Skillset、2个DS、4个Indexer；**KS尚未创建，原native KB尚未追加来源**。不修改或复用旧三份 DOCX 的 Indexer，不改 Remote/Push；输出 JSON 的外层是本地配置包，不能把整个包当 Search API 请求发送。
+配置使用新前缀 `teams-acl-demo-sp-native-charts` 的 Index、Skillset、KS、两个精确文件夹 Data source；有四个 Indexer，各部门/格式各一个，全部默认 **disabled、schedule null、失败阈值0**。已创建 Index、Skillset、2个DS、4个Indexer和KS；**原native KB保留旧KS，并追加 `teams-acl-demo-sp-native-charts-ks`**，仍为 `models: []`、minimal、extractiveData，没有重新发布Agent/Bot。不修改或复用旧三份 DOCX 的 Indexer，不改 Remote/Push；输出 JSON 的外层是本地配置包，不能把整个包当 Search API 请求发送。
 
 `knowledge_base_update` 只接受预期的 native KB 单源/minimal/extractiveData 状态，保留原来源及其选项，并返回追加图表 KS 的请求体与 `ifMatch` ETag；遇到来源漂移、重复追加或缺少新鲜 ETag 即拒绝，不提交任何请求。
 
-复用已只读核实存在的 `gpt-4.1-mini` 部署和第一方 Azure OpenAI 端点。模型输入定义只有图片与固定描述指令，不含 ACL ID、预期答案或文件名。Search MI 已有资源级 Cognitive Services OpenAI User，无需新增持久角色。没有独立 OCR/embedding/Content Understanding 步骤，本轮定义采用**视觉模型直接生成描述 + 文本/语义检索**，不是图片向量检索或返回原图；首次运行报告处理0文件，不据此宣称完整账单或下游调用数为0。
+复用已只读核实存在的 `gpt-4.1-mini` 部署和第一方 Azure OpenAI 端点。模型输入定义只有图片与固定描述指令，不含 ACL ID、预期答案或文件名。Search MI 已有资源级 Cognitive Services OpenAI User，无需新增持久角色。没有独立 OCR/embedding/Content Understanding 步骤，本轮采用**视觉模型直接生成描述 + 文本/语义检索**，不是图片向量检索或返回原图；成功执行不等于已独立核实描述准确性或完整下游计费次数。
 
 每条派生记录通过 **indexProjections** 直接复制：
 
@@ -371,9 +373,9 @@ projection 使用 `skipIndexingParentDocuments`，不依赖父文档 fieldMappin
 
 ### 8.3 未通过项与执行边界
 
-- **独立 PNG 支持未知。** Content Understanding/OCR/视觉模型能读 PNG，不等于 SharePoint 连接器一定能读取原始 PNG。连接器公布的格式表未列 PNG；默认配置只生成 PDF Indexer，PNG 需要显式 `--include-png-compatibility-probe`。这只是本地生成开关，**不是云执行批准**。若实际拒绝/跳过/没有图片输出，必须记为兼容性未通过，不用其他路线伪装通过。
+- **独立 PNG 已通过本环境一次性摄取实测。** 两个PNG Indexer各成功处理1文件，四个来源合计4条图片记录；没有复制到Blob或把PNG改装成PDF。连接器公布的格式表未列PNG，因此不把实测扩大为所有PNG/租户的正式支持保证；默认配置仍需显式 `--include-png-compatibility-probe` 开关纳入PNG，该开关本身不是云执行批准。
 - **原图展示不在此实现中。** SharePoint ACL 摄取不支持 knowledge store/asset store，因此不能为展示原图偷偷添加文件投影、公开 Blob 或共享 SAS；本轮只检索图表描述和来源。
-- 用户已批准限定云操作和 A/B 各1题；创建前已核实四文件、来源实际 ACL、资源/角色碰撞和精确文件夹范围。四个隔离 Indexer 约定各最多一次应用级入库，结束即禁用，不自动 Reset/重跑。当前仅 Finance PDF 消耗首次运行，其余3个尚未运行。平台内部重试可能增加模型调用/计费，不能保证恰好四次模型请求。
+- 用户已批准限定云操作和 A/B 各1题；创建前已核实四文件、来源实际 ACL、资源/角色碰撞和精确文件夹范围。原约定每Indexer一次，首次Finance PDF失败后停止，后续用户明确要求继续测试才执行所披露的一次补跑。**实际历史次数Finance PDF为2（首败+补跑成功），其余各1**，未Reset。平台内部重试可能增加模型调用/计费，不能保证恰好四次模型请求。
 - A/B 应分别用真实身份和正常权限路径验证两种格式：允许文件的校验码、三个柱值、最高/最低、变化方向、文件来源均正确；另一个部门的正文、校验码、标题及来源均不能出现。无结果不能当“拒绝成功”，还要有对应允许用户的正例。已批新预算 A/B 各1题，当前发送0/2；没有因入库失败发题，旧测试预算不复用。当前会话未发现 Computer Use 工具，最终个人聊天交互仍需可用工具或用户协助，不能换 admin 冒充 A/B。
 - 既有 CA 官方支持限制、生成描述可能误读/幻觉、源 ACL 同步延迟继续存在；离线映射测试不证明实际 ACL ID、最终用户令牌传递或撤权行为。
 
@@ -386,7 +388,7 @@ python -B .\scripts\native_chart_demo.py definitions --include-png-compatibility
 python -B -m unittest discover -s tests -p "test_native_chart_demo.py" -v
 ```
 
-新增本地测试覆盖每图源权限/路径/站点投影、模型输入不含ACL/预期答案、PNG显式兼容性开关、禁用/限格式/限文件夹配置、KB漂移保护、真实源ACL/成员漂移拒绝、清理异常时仍删除角色，以及从PNG/PDF内嵌位图像素反算柱高与基准一致。这些结果不是视觉模型识别或真实A/B权限验收。
+新增本地测试覆盖每图源权限/路径/站点投影、模型输入不含ACL/预期答案、PNG显式兼容性开关、禁用/限格式/限文件夹配置、KB漂移保护、真实源ACL/成员漂移拒绝、清理异常时仍删除角色、修复范围与ETag校验、未完整入库不得接入KB，以及从PNG/PDF内嵌位图像素反算柱高与基准一致。全体Python测试50项通过；这些不是视觉模型识别或真实A/B权限验收。
 
 ### 8.4 实际错误与恢复边界
 
@@ -396,9 +398,21 @@ python -B -m unittest discover -s tests -p "test_native_chart_demo.py" -v
 | 创建 Skillset | 固定提示词中的英文单引号未转义，服务明确400拒绝。Index已创建，Skillset未创建；修正本地字符串后核实唯一既有Index与预期相同，仅接续剩余对象，没有覆盖/重建Index或发起入库 |
 | 首次 Finance PDF 入库 | `transientFailure`，处理0、失败0，错误：`parentId is not a retrievable field`。原生连接器内部 `$select` 父子关联ID时要求它可返回；不能因失败数0就判断成功 |
 | 清理和独立读回 | Finance PDF历史1次，其余3个历史0次；新Index记录0；新4/旧3个Indexer均disabled，临时单Index Data Contributor不存在 |
-| 待批准修复 | 仅将新Index非ACL关联字段 `parentId` 设为retrievable:true，并给Finance PDF明确增加1次补跑，其余3个仍首次一次。确认工具返回用户不可用，**不是批准**；线上仍false，本地生成器已纠正。ACL、来源路径、站点字段继续不可返回 |
+| 后续限定修复 | 首次修复确认工具返回用户不可用时没有执行；随后用户明确要求“提交代码，并开始测试”，才按已披露范围将新Index非ACL关联字段 `parentId` 设为retrievable:true，Finance PDF补跑1次，其余各首次1次。更新使用If-Match ETag，ACL、来源路径、站点字段继续不可返回 |
+| 四源完成后接入 | 独立核实4条记录及所有Indexer禁用后创建图表KS，以If-Match仅向既有native KB追加该KS，保留原来源及其配置；没有重建旧Index或重发测试题 |
 
-私有证据（`.azure` 被忽略）：`native-charts-preflight-20261125.json`、`native-charts-source-acl-20261125.json` 位于 `.azure/`；上传/部署/运行/最终独立核对位于 `.azure/indexed/native-charts-{upload,deploy,run,after-first-run}-20261125.json`。临时assignment精确ID保存在run证据；没有把原始权限证据放进Git。
+成功入库时间（2026-11-25 UTC+8）：
+
+| 来源 | 形态 | 时间 | 实际结果 |
+| --- | --- | --- | --- |
+| Finance | 内嵌图PDF，获批补跑 | 10:11:00–10:11:33 | success，处理1，失败0，errors空 |
+| Finance | 独立PNG | 10:12:10–10:12:15 | success，处理1，失败0，errors空 |
+| HR | 内嵌图PDF | 10:12:46–10:12:50 | success，处理1，失败0，errors空 |
+| HR | 独立PNG | 10:13:21–10:13:49 | success，处理1，失败0，errors空 |
+
+四次成功均保留文件夹ACL传播自动启用、图片提取可能计费的warning，未隐藏。两次临时Data Contributor仅限新图表Index，assignment末段 `41eca3c0-b3cd-40a0-8325-521c5b2bc179`（首败）与 `48147fe5-d721-4d87-84f3-e104aeae30c0`（修复运行）均已清理，后者另有独立角色列表确认不存在。没有临时扩大到Search服务级或新增持久模型角色。
+
+私有证据（`.azure` 被忽略）：`native-charts-preflight-20261125.json`、`native-charts-source-acl-20261125.json` 位于 `.azure/`；上传/部署/首败/修复/接入/最终独立核对位于 `.azure/indexed/native-charts-{upload,deploy,run,after-first-run,repair-run,attach,final-readback}-20261125.json`。没有把原始权限证据放进Git。
 
 ## 官方参考
 

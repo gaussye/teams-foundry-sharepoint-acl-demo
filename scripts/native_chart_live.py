@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
+import tempfile
 import time
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -14,11 +15,11 @@ import uuid
 from indexed_agent_deploy import PROJECT_ID
 from indexed_verify import matches
 from native_chart_demo import (
-    FOLDER, INDEX, KS, LIBRARIES, PREFIX, configuration, knowledge_base_update,
+    FOLDER, INDEX, KS, LIBRARIES, NATIVE_KB, PREFIX, configuration, knowledge_base_update,
 )
 from native_indexer_experiment import (
     ADMIN, ENDPOINT, GRAPH, LOGIN, MI, ROLE, SITE, SUBSCRIPTION, cli, request,
-    require, search, status_evidence,
+    VERSION, require, search, status_evidence,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -213,7 +214,63 @@ def deploy(journal):
             journal.save()
 
 
-def run(journal):
+def conditional_search_put(path, body, etag):
+    require(isinstance(etag, str) and etag and "\n" not in etag and "\r" not in etag,
+            "Fresh valid ETag required")
+    with tempfile.TemporaryDirectory(prefix="native-chart-update-") as directory:
+        payload = Path(directory) / "body.json"
+        payload.write_text(json.dumps(body), encoding="utf-8")
+        return cli("rest", "--method", "PUT",
+                   "--url", f"{ENDPOINT}/{path}?api-version={VERSION}",
+                   "--resource", "https://search.azure.com", "--headers", "If-Match=" + etag,
+                   "--body", "@" + str(payload))
+
+
+def repair_run(journal):
+    previous = json.loads((EVIDENCE / "native-charts-run-20261125.json").read_text())
+    require(previous["status"] == "failed-no-automatic-retry"
+            and previous["cleanupVerifiedAbsent"] is True and len(previous["runs"]) == 1,
+            "Only the recorded first chart run failure may be repaired")
+    failed = previous["runs"][0]
+    last = failed["observed"]["lastResult"]
+    require(failed["name"] == PREFIX + "-finance-pdf-indexer"
+            and "parentId' is not a retrievable field" in last["errorMessage"]
+            and last["itemsProcessed"] == 0 and last["itemsFailed"] == 0,
+            "Unexpected failure; no approved extra-run recovery applies")
+    expected = configuration(include_png_probe=True)
+    baselines = {}
+    for definition in expected["indexers"]:
+        actual = search("GET", "indexers/" + definition["name"])
+        state = search("GET", "indexers/" + definition["name"] + "/status")
+        count = 1 if definition["name"] == failed["name"] else 0
+        require(actual["disabled"] is True and len(state.get("executionHistory", [])) == count,
+                "Indexer state changed since the specific repair approval")
+        matches(actual, definition)
+        if count:
+            require(state["lastResult"]["startTime"] == last["startTime"],
+                    "Another execution appeared; no more runs allowed")
+        baselines[definition["name"]] = count
+    require(search("GET", "indexes/" + INDEX + "/stats")["documentCount"] == 0,
+            "Chart records appeared; inspect rather than repair blindly")
+    actual = search("GET", "indexes/" + INDEX)
+    before_expected = deepcopy(expected["index"])
+    next(f for f in before_expected["fields"] if f["name"] == "parentId")["retrievable"] = False
+    matches(actual, before_expected)
+    updated = deepcopy(actual)
+    etag = updated.pop("@odata.etag")
+    updated.pop("@odata.context", None)
+    next(f for f in updated["fields"] if f["name"] == "parentId")["retrievable"] = True
+    journal.value["indexBefore"] = actual
+    journal.attempt("repair-only-parentId-retrievable")
+    conditional_search_put("indexes/" + INDEX, updated, etag)
+    readback = search("GET", "indexes/" + INDEX)
+    matches(readback, expected["index"])
+    journal.value["indexAfter"] = readback
+    journal.save()
+    run(journal, baselines=baselines)
+
+
+def run(journal, baselines=None):
     deployment = json.loads((EVIDENCE / "native-charts-deploy-20261125.json").read_text())
     require(deployment["status"] == "success", "Deployment stage incomplete")
     config = configuration(include_png_probe=True)
@@ -239,8 +296,11 @@ def run(journal):
             require(actual["disabled"] is True and actual["targetIndexName"] == INDEX
                     and actual["skillsetName"] == config["skillset"]["name"],
                     "Indexer drift before run")
-            require(not history.get("executionHistory") and not history.get("lastResult"),
-                    "Indexer already ran; no automatic retry")
+            baseline = 0 if baselines is None else baselines[name]
+            require(len(history.get("executionHistory", [])) == baseline
+                    and (baseline != 0 or not history.get("lastResult")),
+                    "Indexer execution history changed; no automatic retry")
+            previous_start = (history.get("lastResult") or {}).get("startTime")
             current = deepcopy(actual)
             for key in ("@odata.context", "@odata.etag"):
                 current.pop(key, None)
@@ -250,13 +310,21 @@ def run(journal):
             entry = {"name": name, "status": "waiting-for-initial-execution"}
             journal.value["runs"].append(entry)
             journal.save()
+            if baseline:
+                # Completed initial runs need an on-demand run; never reset or duplicate an observed run.
+                after_enable = search("GET", "indexers/" + name + "/status")
+                if (after_enable.get("lastResult") or {}).get("startTime") == previous_start:
+                    journal.attempt("approved-single-extra-run-" + name)
+                    search("POST", "indexers/" + name + "/run")
+                    entry["explicitRunSubmitted"] = True
+                    journal.save()
             deadline = time.monotonic() + 420
             while True:
                 state = search("GET", "indexers/" + name + "/status")
                 entry["observed"] = status_evidence(state)
                 journal.save()
                 last = state.get("lastResult")
-                if last and last.get("endTime"):
+                if last and last.get("endTime") and last.get("startTime") != previous_start:
                     break
                 require(time.monotonic() < deadline, "Run observation deadline; no re-run allowed")
                 time.sleep(8)
@@ -268,7 +336,8 @@ def run(journal):
             current = None
             entry["status"] = last["status"]
             journal.save()
-            require(len(state.get("executionHistory", [])) == 1, "Unexpected execution count")
+            require(len(state.get("executionHistory", [])) == baseline + 1,
+                    "Unexpected execution count")
             # A rejected PNG is a compatibility result, not a reason to run it again.
             if last["status"] != "success" or last["itemsFailed"]:
                 entry["compatibilityPassed"] = False
@@ -307,9 +376,47 @@ def run(journal):
         require(not cleanup_errors, "Cleanup failed: " + "; ".join(cleanup_errors))
 
 
+def attach(journal):
+    executed = json.loads((EVIDENCE / "native-charts-repair-run-20261125.json").read_text())
+    require(executed["status"] == "success" and executed["cleanupVerifiedAbsent"] is True
+            and len(executed["runs"]) == 4
+            and all(r["compatibilityPassed"] for r in executed["runs"]),
+            "All four sources must pass ingestion before changing native retrieval")
+    config = configuration(include_png_probe=True)
+    for definition in config["indexers"]:
+        actual = search("GET", "indexers/" + definition["name"])
+        require(actual["disabled"] is True, "Chart indexer still enabled")
+    deadline = time.monotonic() + 60
+    while True:
+        stats = search("GET", "indexes/" + INDEX + "/stats")
+        if stats["documentCount"] == 4:
+            break
+        require(stats["documentCount"] < 4 and time.monotonic() < deadline,
+                "Expected four image records did not appear; do not attach incomplete evidence")
+        time.sleep(5)
+    journal.value["stats"] = stats
+    inventory = search("GET", "knowledgesources?$select=name")
+    require(not inventory.get("@odata.nextLink")
+            and not any(item["name"] == KS for item in inventory["value"]), "KS collision")
+    journal.attempt("create-native-chart-ks")
+    search("PUT", "knowledgesources/" + KS, config["knowledgeSource"])
+    readback = search("GET", "knowledgesources/" + KS)
+    matches(readback, config["knowledgeSource"])
+    journal.value["knowledgeSource"] = readback
+    existing = search("GET", "knowledgebases/" + NATIVE_KB)
+    update = knowledge_base_update(existing)
+    journal.value["knowledgeBaseBefore"] = existing
+    journal.attempt("append-chart-ks-to-existing-native-kb")
+    conditional_search_put("knowledgebases/" + NATIVE_KB, update["body"], update["ifMatch"])
+    actual = search("GET", "knowledgebases/" + NATIVE_KB)
+    matches(actual, update["body"])
+    journal.value["knowledgeBaseAfter"] = actual
+    journal.save()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=("upload", "deploy", "run"))
+    parser.add_argument("stage", choices=("upload", "deploy", "run", "repair-run", "attach"))
     parser.add_argument("--execute-approved", action="store_true")
     parser.add_argument("--resume-readonly-preflight", action="store_true")
     parser.add_argument("--resume-skill-expression-rejection", action="store_true")
@@ -319,7 +426,8 @@ def main():
     journal = Journal(args.stage, args.resume_readonly_preflight,
                       args.resume_skill_expression_rejection)
     try:
-        {"upload": upload, "deploy": deploy, "run": run}[args.stage](journal)
+        {"upload": upload, "deploy": deploy, "run": run,
+         "repair-run": repair_run, "attach": attach}[args.stage](journal)
         journal.value["status"] = "success"
     except Exception as error:
         journal.value.update({"status": "failed-no-automatic-retry",

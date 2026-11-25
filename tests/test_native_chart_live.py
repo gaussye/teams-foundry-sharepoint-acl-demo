@@ -8,7 +8,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from native_chart_demo import INDEX, configuration
-from native_chart_live import GROUPS, Journal, permission_signature, run, verify_root_acl
+from native_chart_live import (
+    GROUPS, Journal, attach, conditional_search_put, permission_signature, repair_run, run,
+    verify_root_acl,
+)
 
 
 class NativeChartLiveGuardsTests(unittest.TestCase):
@@ -101,6 +104,56 @@ class NativeChartLiveGuardsTests(unittest.TestCase):
                 self.assertTrue(journal.value["cleanupVerifiedAbsent"])
                 self.assertTrue(journal.value["cleanupErrors"])
                 self.assertTrue(any(call.args[0] == "DELETE" for call in network.call_args_list))
+
+    def test_repair_rejects_unrelated_or_processed_failure_before_cloud_calls(self):
+        baseline = {
+            "status": "failed-no-automatic-retry", "cleanupVerifiedAbsent": True,
+            "runs": [{"name": "teams-acl-demo-sp-native-charts-finance-pdf-indexer",
+                      "observed": {"lastResult": {
+                          "errorMessage": "Invalid expression: 'parentId' is not a retrievable field",
+                          "itemsProcessed": 0, "itemsFailed": 0}}}],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-charts-run-20261125.json"
+            for override in ({"errorMessage": "some other error"}, {"itemsProcessed": 1}):
+                changed = deepcopy(baseline)
+                changed["runs"][0]["observed"]["lastResult"].update(override)
+                path.write_text(json.dumps(changed))
+                with patch("native_chart_live.EVIDENCE", Path(directory)), \
+                        patch("native_chart_live.search") as network:
+                    with self.assertRaises(ValueError):
+                        repair_run(None)
+                    network.assert_not_called()
+
+    def test_conditional_update_requires_a_valid_fresh_etag(self):
+        for etag in (None, "", '"etag"\r\nunexpected'):
+            with patch("native_chart_live.cli") as network:
+                with self.assertRaises(ValueError):
+                    conditional_search_put("indexes/" + INDEX, {}, etag)
+                network.assert_not_called()
+
+    def test_partial_or_failed_image_ingestion_cannot_be_attached_to_live_native_kb(self):
+        baseline = {"status": "success", "cleanupVerifiedAbsent": True,
+                    "runs": [{"compatibilityPassed": True} for _ in range(4)]}
+        cases = []
+        missing = deepcopy(baseline)
+        missing["runs"].pop()
+        cases.append(missing)
+        failed = deepcopy(baseline)
+        failed["runs"][1]["compatibilityPassed"] = False
+        cases.append(failed)
+        unclean = deepcopy(baseline)
+        unclean["cleanupVerifiedAbsent"] = False
+        cases.append(unclean)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "native-charts-repair-run-20261125.json"
+            for value in cases:
+                path.write_text(json.dumps(value))
+                with patch("native_chart_live.EVIDENCE", Path(directory)), \
+                        patch("native_chart_live.search") as network:
+                    with self.assertRaises(ValueError):
+                        attach(None)
+                    network.assert_not_called()
 
 
 if __name__ == "__main__":
