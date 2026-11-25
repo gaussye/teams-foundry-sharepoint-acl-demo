@@ -1,0 +1,32 @@
+{
+  "description": "Original synthetic SharePoint test documents, copied without changing file bytes.",
+  "provenance": "Retained real source capture from 2026-10-25; not regenerated and not downloaded again for repository publication.",
+  "sourceCaptureCompletedAt": "2026-10-25T06:17:13.108Z",
+  "securityNote": "Fictional test data only. Repository copies do not carry or enforce SharePoint ACLs; expected A/B access below describes the source test setup, not GitHub access control.",
+  "files": [
+    {
+      "name": "ACLDEMO_PUBLIC_20261024_P731.docx",
+      "bytes": 18505,
+      "sha256": "c1e2eafc5409bb42b4d15fb593f32e3fbe76a8619b4f4f29b8eb7aa7ace5a5c7",
+      "expectedSourceReaders": ["A", "B"],
+      "allocation": 1000,
+      "verificationCode": "CEDAR-P731"
+    },
+    {
+      "name": "ACLDEMO_FINANCE_20261024_F482.docx",
+      "bytes": 18485,
+      "sha256": "80b322a2b837feebac093e024c5d6c0de73a56bb2e449a97538b351726b6934a",
+      "expectedSourceReaders": ["A"],
+      "allocation": 4200,
+      "verificationCode": "CEDAR-F482"
+    },
+    {
+      "name": "ACLDEMO_HR_20261024_H965.docx",
+      "bytes": 16177,
+      "sha256": "ecca1ad8f3f0dffd9bd58b20093289a4ac55b66359390f2e8b768be0d7e8b750",
+      "expectedSourceReaders": ["B"],
+      "allocation": 7300,
+      "verificationCode": "CEDAR-H965"
+    }
+  ]
+}

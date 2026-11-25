@@ -12,11 +12,23 @@
 
 | 库 | 合成文件 | 内容 / 预期授权 |
 | --- | --- | --- |
-| `TeamsAclDemoPublic` | `ACLDEMO_PUBLIC_20261024_P731.docx` | 1000 / `CEDAR-P731`，A+B |
-| `TeamsAclDemoFinance` | `ACLDEMO_FINANCE_20261024_F482.docx` | 4200 / `CEDAR-F482`，A |
-| `TeamsAclDemoHR` | `ACLDEMO_HR_20261024_H965.docx` | 7300 / `CEDAR-H965`，B |
+| `TeamsAclDemoPublic` | [ACLDEMO_PUBLIC_20261024_P731.docx](tests/fixtures/sharepoint-originals/ACLDEMO_PUBLIC_20261024_P731.docx) | 1000 / `CEDAR-P731`，A+B |
+| `TeamsAclDemoFinance` | [ACLDEMO_FINANCE_20261024_F482.docx](tests/fixtures/sharepoint-originals/ACLDEMO_FINANCE_20261024_F482.docx) | 4200 / `CEDAR-F482`，A |
+| `TeamsAclDemoHR` | [ACLDEMO_HR_20261024_H965.docx](tests/fixtures/sharepoint-originals/ACLDEMO_HR_20261024_H965.docx) | 7300 / `CEDAR-H965`，B |
 
 只读 test 站点的三库；各文件继承对应库的独立 ACL，内容组 Read、Owners Full Control。上表是验收预期，不是写入权限的规则。
+
+### 1.1 测试原文件、图片与结果入口
+
+| 资料 | 仓库位置 |
+| --- | --- |
+| 原始 Public / Finance / HR 三份 DOCX | [sharepoint-originals](tests/fixtures/sharepoint-originals)，上表可逐份下载；[字节数、SHA256与测试预期](tests/fixtures/sharepoint-originals/manifest.json) |
+| 图表实测的两份 PDF、两份独立 PNG | [native-charts](tests/fixtures/native-charts)，逐份入口及PDF内嵌图预览见 §8.1；[本地预期答案/原文件哈希](tests/fixtures/native-charts/expected.json) |
+| 真实 A/B 图表答复截图 | [A](docs/images/indexed/native-charts-teams-a-result.jpg)、[B](docs/images/indexed/native-charts-teams-b-result.jpg)，判断和限制见 §8.5 |
+
+三份 DOCX 来自 2026-10-25 保留的真实源采集副本，字节/哈希与当时记录完全一致，不是后来按答案重新生成；保留原始 Office/SharePoint 内容类型元数据，未携带原始ACL采集清单。图表PDF/PNG也保留实测源文件字节。
+
+**这些都是可公开的合成资料，不是真实财务/人事数据。仓库副本不继承SharePoint ACL**：任何能读取本仓库的人都能查看Finance/HR样例。权限隔离是在测试站点和Search查询路径中验证的，不由GitHub目录名或本地预期清单执行。重新部署时只上传实际源文件，按环境配置真实ACL，不上传预期答案、截图或预览衍生图。
 
 ## 2. 架构与权限流程
 
@@ -323,9 +335,9 @@ node --test .\tests\indexed-agent-config.test.mjs .\tests\indexed-browser-captur
 | A/B最小遥测 | `native-e2e-A-telemetry-20261124.json`、`native-e2e-B-telemetry-20261124.json` |
 | 父会话授权/ACL非空诊断 | 父worktree的 `native-site-grant-20261123.json`、`native-acl-counts-20261123.json`，不声称本worktree已复制 |
 
-## 8. 图表扩展：两种形态已入库，A/B待验收（2026-11-25）
+## 8. 图表扩展：两种形态已入库，A/B真实测试完成（2026-11-25）
 
-**状态不能与第 5 节混淆：** 旧三份 DOCX 的文字测试已完成；新增图表经过用户后续明确要求“提交代码，并开始测试”后，按已披露范围仅修复 `parentId` 并给 Finance PDF 增加一次补跑。现在 **PDF内嵌图、独立PNG各部门各1文件均成功，图表Index为4条，图表KS已追加到原native KB**。这不是图表答案正确或A/B ACL验收通过：用户问题仍发送0/2，当前缺少可调用的Computer Use工具，手工测试确认未收到实际用户回答。新4/旧3个Indexer均禁用，精确临时角色已删除，原始失败证据保留。
+**状态不能与第 5 节混淆：** 旧三份 DOCX 的文字测试已完成；新增图表经过用户后续明确要求“提交代码，并开始测试”后，按已披露范围仅修复 `parentId` 并给 Finance PDF 增加一次补跑。现在 **PDF内嵌图、独立PNG各部门各1文件均成功，图表Index为4条，图表KS已追加到原native KB**。A/B真实同题测试各1次完成：A仅返回Finance，B仅返回HR，两种形态均有允许正例，未观察到对方内容泄漏；这是**配对可见答案级隔离观察，不是完整ACL审计**。A的PDF漏答最低项，严格完整性仍部分通过，其余3个案例答案级通过。实际2/2题，无补发。新增4个图表Indexer按用户要求保持启用、schedule为null，旧3个文本Indexer仍禁用，精确临时角色已清理。
 
 ### 8.1 两种真实文件形态
 
@@ -335,6 +347,8 @@ node --test .\tests\indexed-agent-config.test.mjs .\tests\indexed-browser-captur
 | --- | --- | --- |
 | PDF 中的一张内嵌图 | [prism-finance-embedded.pdf](tests/fixtures/native-charts/prism-finance-embedded.pdf) | [prism-hr-embedded.pdf](tests/fixtures/native-charts/prism-hr-embedded.pdf) |
 | 独立 PNG 图片文件 | [prism-finance-standalone.png](tests/fixtures/native-charts/prism-finance-standalone.png) | [prism-hr-standalone.png](tests/fixtures/native-charts/prism-hr-standalone.png) |
+
+PDF内嵌原图可直接预览：[Finance](tests/fixtures/native-charts/prism-finance-embedded-image.png)、[HR](tests/fixtures/native-charts/prism-hr-embedded-image.png)。这两张PNG由已测试PDF中的实际嵌入图片提取，像素一致、未重新绘制；只用于仓库查看，**没有作为额外SharePoint源上传，也不增加测试案例或模型调用**。
 
 每图包含不同校验码、North/Central/South 柱形及刻度，但没有柱顶数值标签；验收不仅识字，还要读柱高、最大/最小地区和变化方向。PDF 只有通用标题的文本层，校验码、类别及图表均在图片像素中，不能靠普通 PDF 正文提取拿到答案。
 
@@ -353,7 +367,7 @@ SharePoint 原文件与真实 ACL
   → 独立 searchIndex KS（待部署后接入原生 KB）
 ```
 
-配置使用新前缀 `teams-acl-demo-sp-native-charts` 的 Index、Skillset、KS、两个精确文件夹 Data source；有四个 Indexer，各部门/格式各一个，全部默认 **disabled、schedule null、失败阈值0**。已创建 Index、Skillset、2个DS、4个Indexer和KS；**原native KB保留旧KS，并追加 `teams-acl-demo-sp-native-charts-ks`**，仍为 `models: []`、minimal、extractiveData，没有重新发布Agent/Bot。不修改或复用旧三份 DOCX 的 Indexer，不改 Remote/Push；输出 JSON 的外层是本地配置包，不能把整个包当 Search API 请求发送。
+配置使用新前缀 `teams-acl-demo-sp-native-charts` 的 Index、Skillset、KS、两个精确文件夹 Data source；有四个 Indexer，各部门/格式各一个，创建定义默认 **disabled、schedule null、失败阈值0**，当前按用户后续要求保持启用。已创建 Index、Skillset、2个DS、4个Indexer和KS；**原native KB保留旧KS，并追加 `teams-acl-demo-sp-native-charts-ks`**，仍为 `models: []`、minimal、extractiveData，没有重新发布Agent/Bot。不修改或复用旧三份 DOCX 的 Indexer，不改 Remote/Push；输出 JSON 的外层是本地配置包，不能把整个包当 Search API 请求发送。
 
 `knowledge_base_update` 只接受预期的 native KB 单源/minimal/extractiveData 状态，保留原来源及其选项，并返回追加图表 KS 的请求体与 `ifMatch` ETag；遇到来源漂移、重复追加或缺少新鲜 ETag 即拒绝，不提交任何请求。
 
@@ -376,7 +390,7 @@ projection 使用 `skipIndexingParentDocuments`，不依赖父文档 fieldMappin
 - **独立 PNG 已通过本环境一次性摄取实测。** 两个PNG Indexer各成功处理1文件，四个来源合计4条图片记录；没有复制到Blob或把PNG改装成PDF。连接器公布的格式表未列PNG，因此不把实测扩大为所有PNG/租户的正式支持保证；默认配置仍需显式 `--include-png-compatibility-probe` 开关纳入PNG，该开关本身不是云执行批准。
 - **原图展示不在此实现中。** SharePoint ACL 摄取不支持 knowledge store/asset store，因此不能为展示原图偷偷添加文件投影、公开 Blob 或共享 SAS；本轮只检索图表描述和来源。
 - 用户已批准限定云操作和 A/B 各1题；创建前已核实四文件、来源实际 ACL、资源/角色碰撞和精确文件夹范围。原约定每Indexer一次，首次Finance PDF失败后停止，后续用户明确要求继续测试才执行所披露的一次补跑。**实际历史次数Finance PDF为2（首败+补跑成功），其余各1**，未Reset。平台内部重试可能增加模型调用/计费，不能保证恰好四次模型请求。
-- A/B 应分别用真实身份和正常权限路径验证两种格式：允许文件的校验码、三个柱值、最高/最低、变化方向、文件来源均正确；另一个部门的正文、校验码、标题及来源均不能出现。无结果不能当“拒绝成功”，还要有对应允许用户的正例。已批新预算 A/B 各1题，当前发送0/2；没有因入库失败发题，旧测试预算不复用。当前会话未发现 Computer Use 工具，最终个人聊天交互仍需可用工具或用户协助，不能换 admin 冒充 A/B。
+- A/B 已分别用真实身份和正常个人聊天路径验证两种格式，结果见 §8.5。两边均在发送前检查历史，没有本轮手发PRISM重复题，精确批准后各发送1次；实际2/2、额度用尽。没有因入库失败、部分答案或引用截断补题，旧测试预算不复用。没有使用admin/公司账号代测，先前看不到demo窗口时已停止等待用户切换。
 - 既有 CA 官方支持限制、生成描述可能误读/幻觉、源 ACL 同步延迟继续存在；离线映射测试不证明实际 ACL ID、最终用户令牌传递或撤权行为。
 
 本地复现命令（均不访问云；依赖清单 [`tests/requirements-native-charts.txt`](tests/requirements-native-charts.txt)，当前环境已安装；Windows 默认使用 Arial，可用 `--font` 指定字体）：
@@ -412,7 +426,45 @@ python -B -m unittest discover -s tests -p "test_native_chart_demo.py" -v
 
 四次成功均保留文件夹ACL传播自动启用、图片提取可能计费的warning，未隐藏。两次临时Data Contributor仅限新图表Index，assignment末段 `41eca3c0-b3cd-40a0-8325-521c5b2bc179`（首败）与 `48147fe5-d721-4d87-84f3-e104aeae30c0`（修复运行）均已清理，后者另有独立角色列表确认不存在。没有临时扩大到Search服务级或新增持久模型角色。
 
-私有证据（`.azure` 被忽略）：`native-charts-preflight-20261125.json`、`native-charts-source-acl-20261125.json` 位于 `.azure/`；上传/部署/首败/修复/接入/最终独立核对位于 `.azure/indexed/native-charts-{upload,deploy,run,after-first-run,repair-run,attach,final-readback}-20261125.json`。没有把原始权限证据放进Git。
+**后续运行策略变更：** 上述限次运行结束时确实禁用了Indexer；随后用户明确要求保持启用，才通过 `enable` 阶段仅将4个图表Indexer的 `disabled` 改为false，使用If-Match避免覆盖并发变更。该操作没有新增角色、没有显式POST Run、没有修改定时计划，也不重用旧测试题预算。`schedule:null` 表示**还没有周期增量同步**，启用不等于文件/ACL变化会持续自动刷新；设置调度需另行确定周期。历史限次运行及旧3个Indexer的状态不因此改写。此变更新增2项本地守卫测试，图表相关16项测试通过。
+
+私有证据（`.azure` 被忽略）：`native-charts-preflight-20261125.json`、`native-charts-source-acl-20261125.json` 位于 `.azure/`；上传/部署/首败/修复/接入/独立核对及启用状态位于 `.azure/indexed/native-charts-{upload,deploy,run,after-first-run,repair-run,attach,final-readback,enable,enabled-readback}-20261125.json`。没有把原始权限证据放进Git。
+
+### 8.5 A/B 图表实测与答案级隔离
+
+Computer Use子会话最初只看到公司账号，没有发题。用户分别手工切换A/B后，fresh窗口标题和profile AX均核实完整demo UPN，只使用既有Native个人聊天。A应用卡片有Native专用描述；B卡片只有对应Nati名称、developer/description空，未新鲜读取app GUID/titleId。两边均未重新安装/登录，发送前只有昨天Cedar历史、无PRISM、输入框为空；各自获得精确一次发送批准后才发送。
+
+本轮问题没有放入预期校验码、数值或权限矩阵：
+
+```text
+What are the visible verification markers, North/Central/South values, highest and lowest regions, and left-to-right bar trends in the PRISM synthetic charts I can access? Cover both the chart embedded in a PDF and the standalone PNG, and cite the source file names. Use only retrieved evidence. If a format has no authorized evidence, say so without guessing. Do not retry.
+```
+
+A原题 `1795574329980`，可见消息ID折算时间 **2026-11-25 10:38:49.980 UTC+8**；答复 `1795574335351`，ID折算10:38:55.351。消息ID时间不是独立端到端耗时/计费轨迹。
+
+| A允许来源 | 实际答复与严格判断 |
+| --- | --- |
+| `prism-finance-embedded.pdf` | `PRISM-F61`，North20/Central60/South40，Central最高、先升后降、文件名均正确；**未显式回答North最低，完整性部分通过**，不通过重发掩盖 |
+| `prism-finance-standalone.png` | `PRISM-F82`，North80/Central40/South20，North最高/South最低、持续下降、文件名均正确；**答案级通过** |
+| HR拒绝侧 | A答复未出现HR校验码/来源/图特有内容；与下面B的HR允许正例配对观察 |
+
+![Native图表A原题与真实答复，PDF漏最低项如实保留](docs/images/indexed/native-charts-teams-a-result.jpg)
+
+该图来自子会话真实CU截图，父会话从运行时已持久化的原始图片裁掉账号/侧栏，并明确遮挡旧Cedar区域；PRISM题、答复和引用标记未改。子会话最初认为没有可导出的文件，后由父会话找到已有transcript-image解决，不重拍、不使用shell截屏。两个引用弹窗均指向native-charts-index，但URL被UI截断，尚未逐引用验证到原始文件的映射；答案中的文件名不是该映射的独立证明。
+
+B原题 `1795574923342`，ID折算 **2026-11-25 10:48:43.342 UTC+8**；答复 `1795574927634`，ID折算10:48:47.634。相同问题，不含任何HR预期答案：
+
+| B允许来源 | 实际答复与严格判断 |
+| --- | --- |
+| `prism-hr-embedded.pdf` | `PRISM-H37`，North60/Central20/South80，South最高/Central最低、先降后升，单位allocation points、文件名均正确；答案级通过 |
+| `prism-hr-standalone.png` | `PRISM-H94`，North40/Central80/South60，Central最高/North最低、先升后降，单位及文件名均正确；答案级通过 |
+| Finance拒绝侧 | B答复未出现Finance校验码/来源/图特有内容；与A的Finance允许正例配对观察 |
+
+![Native图表B原题与真实HR答复，含两种图片形态](docs/images/indexed/native-charts-teams-b-result.jpg)
+
+B图由子会话从已有CU原图裁掉账号/侧栏并明确遮挡旧消息，父会话仅转存为JPEG，没有改变本轮题答。两B引用弹窗也指向native-charts-index，仍只有截断URL，未逐项打开源文件验证。原题与答复全文转写保留在私有证据，不把合成预期清单当实际回答。
+
+**结论：** 四种“身份×格式”都有真实允许内容，A未见HR、B未见Finance，配对可见答案级隔离观察通过。图表答案的严格字段完整性为3个通过、1个部分通过（A PDF漏显式最低项），不包装成四项全通过，也不补发。没有完整caller/逐chunk ACL决策trace、撤权测试、完整引用至文件映射或全SharePoint授权语义证明；没有另发遥测或后台检索。本轮实际A/B各1、共2/2题，无余额，UI已停止。
 
 ## 官方参考
 

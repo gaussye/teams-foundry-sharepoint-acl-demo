@@ -9,7 +9,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from native_chart_demo import INDEX, configuration
 from native_chart_live import (
-    GROUPS, Journal, attach, conditional_search_put, permission_signature, repair_run, run,
+    GROUPS, Journal, attach, conditional_search_put, enabled_definition,
+    permission_signature, repair_run, run,
     verify_root_acl,
 )
 
@@ -154,6 +155,26 @@ class NativeChartLiveGuardsTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         attach(None)
                     network.assert_not_called()
+
+    def test_enable_only_changes_disabled_and_preserves_no_schedule(self):
+        baseline = configuration(include_png_probe=True)["indexers"][0]
+        actual = {**deepcopy(baseline), "@odata.etag": '"revision"', "@odata.context": "context"}
+        body = enabled_definition(actual)
+        expected = deepcopy(baseline)
+        expected["disabled"] = False
+        self.assertEqual(body, expected)
+        self.assertTrue(actual["disabled"])
+
+    def test_enable_rejects_other_indexers_source_drift_and_new_schedules(self):
+        actual = configuration(include_png_probe=True)["indexers"][0]
+        for override in (
+            {"name": "teams-acl-demo-sp-native-public-indexer"},
+            {"dataSourceName": "unrelated-source"},
+            {"schedule": {"interval": "PT5M"}},
+            {"disabled": None},
+        ):
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                enabled_definition({**actual, **override})
 
 
 if __name__ == "__main__":

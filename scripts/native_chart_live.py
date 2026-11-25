@@ -414,9 +414,44 @@ def attach(journal):
     journal.save()
 
 
+def enabled_definition(actual):
+    definitions = {d["name"]: d for d in configuration(include_png_probe=True)["indexers"]}
+    require(actual.get("name") in definitions, "Only the four native chart Indexers may be enabled")
+    require(type(actual.get("disabled")) is bool and actual.get("schedule") is None,
+            "Indexer enabled state or schedule changed")
+    expected = deepcopy(definitions[actual["name"]])
+    expected["disabled"] = actual["disabled"]
+    matches(actual, expected)
+    body = deepcopy(actual)
+    body.pop("@odata.context", None)
+    body.pop("@odata.etag", None)
+    body["disabled"] = False
+    return body
+
+
+def enable(journal):
+    snapshots = []
+    for definition in configuration(include_png_probe=True)["indexers"]:
+        actual = search("GET", "indexers/" + definition["name"])
+        body = enabled_definition(actual)
+        snapshots.append((actual, body))
+    journal.value.update({"before": [actual for actual, _ in snapshots], "after": [],
+                          "explicitRunRequests": 0, "newRoleAssignments": 0})
+    journal.save()
+    for actual, body in snapshots:
+        path = "indexers/" + actual["name"]
+        if actual["disabled"]:
+            journal.attempt("leave-enabled-" + actual["name"])
+            conditional_search_put(path, body, actual.get("@odata.etag"))
+        readback = search("GET", path)
+        matches(readback, body)
+        journal.value["after"].append(readback)
+        journal.save()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=("upload", "deploy", "run", "repair-run", "attach"))
+    parser.add_argument("stage", choices=("upload", "deploy", "run", "repair-run", "attach", "enable"))
     parser.add_argument("--execute-approved", action="store_true")
     parser.add_argument("--resume-readonly-preflight", action="store_true")
     parser.add_argument("--resume-skill-expression-rejection", action="store_true")
@@ -427,7 +462,7 @@ def main():
                       args.resume_skill_expression_rejection)
     try:
         {"upload": upload, "deploy": deploy, "run": run,
-         "repair-run": repair_run, "attach": attach}[args.stage](journal)
+         "repair-run": repair_run, "attach": attach, "enable": enable}[args.stage](journal)
         journal.value["status"] = "success"
     except Exception as error:
         journal.value.update({"status": "failed-no-automatic-retry",
